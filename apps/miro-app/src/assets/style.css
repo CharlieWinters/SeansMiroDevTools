@@ -1,0 +1,102 @@
+@import 'mirotone/dist/styles.css';
+
+:root {
+  --color-primary: #4262ff;
+  --color-success: #087429;
+  --color-warning: #af7e02;
+  --color-error: #d9534f;
+  --color-bg: #ffffff;
+  --color-bg-secondary: #f5f5f5;
+  --color-text: #222428;
+  --color-text-muted: #6b6b6b;
+  --font-mono: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font);
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+#app-shell {
+  padding: 16px;
+  min-height: 100vh;
+}
+
+.module-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.module-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.module-item:hover {
+  background-color: var(--color-bg-secondary);
+}
+
+.module-item-name {
+  font-weight: 500;
+}
+
+.module-item-description {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.status-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+
+.status-indicator.active {
+  background-color: var(--color-success);
+}
+
+.status-indicator.inactive {
+  background-color: var(--color-text-muted);
+}
+
+.status-indicator.error {
+  background-color: var(--color-error);
+}
+
+/* Code/Terminal styling */
+.code-block {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+.variable-highlight {
+  color: #4ec9b0;
+  background: rgba(78, 201, 176, 0.1);
+  padding: 0 2px;
+  border-radius: 2px;
+}

@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Miro Updates File",
+  "description": "Schema for .miro-updates.json file used by agents to update board state",
+  "type": "object",
+  "required": ["version", "timestamp", "updates"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Schema version"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of when updates were generated"
+    },
+    "updates": {
+      "type": "array",
+      "description": "List of update operations to apply",
+      "items": {
+        "type": "object",
+        "required": ["action", "itemType", "data"],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["create", "update", "delete"],
+            "description": "The operation to perform"
+          },
+          "itemType": {
+            "type": "string",
+            "enum": ["sticky_note", "shape", "text", "frame", "card"],
+            "description": "Type of Miro item"
+          },
+          "itemId": {
+            "type": "string",
+            "description": "ID of existing item (required for update/delete)"
+          },
+          "data": {
+            "type": "object",
+            "description": "Item data",
+            "properties": {
+              "content": {
+                "type": "string",
+                "description": "Text content of the item"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Tags to apply (as #tag in content)"
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Metadata key-value pairs (as @key=value in content)"
+              },
+              "position": {
+                "type": "object",
+                "properties": {
+                  "x": { "type": "number" },
+                  "y": { "type": "number" }
+                },
+                "description": "Position on the board"
+              },
+              "parentId": {
+                "type": "string",
+                "description": "ID of parent frame"
+              },
+              "style": {
+                "type": "object",
+                "description": "Visual styling properties"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

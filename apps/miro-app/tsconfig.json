@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "noEmit": true,
+    "typeRoots": [
+      "./node_modules/@types",
+      "./node_modules/@mirohq"
+    ],
+    "paths": {
+      "@/*": ["./src/*"],
+      "@miro-ide/shared": ["../../shared/src"]
+    }
+  },
+  "include": ["src", "*.ts", "*.d.ts"],
+  "exclude": ["node_modules", "dist"]
+}
