@@ -42,6 +42,10 @@ const embedIdToWidgetId = new Map<string, string>();
 let contextRefreshInterval: ReturnType<typeof setInterval> | null = null;
 const CONTEXT_REFRESH_MS = 10_000; // refresh connected docs every 10s
 
+/** Interval for polling context requests (terminal asked for viewport/context) */
+let contextRequestPollInterval: ReturnType<typeof setInterval> | null = null;
+const CONTEXT_REQUEST_POLL_MS = 2_000;
+
 /**
  * Start or connect to a terminal session for the given board ID
  */
@@ -171,11 +175,14 @@ async function fetchConnectedDocs(widgetId: string): Promise<ConnectedDoc[]> {
 async function pushContextToServer(embedId: string, widgetId: string): Promise<void> {
   try {
     console.log('[Terminal] Pushing context: embedId=', embedId, 'widgetId (terminal embed)=', widgetId);
-    const docs = await fetchConnectedDocs(widgetId);
+    const [docs, viewport] = await Promise.all([
+      fetchConnectedDocs(widgetId),
+      miroSdk!.board.viewport.get(),
+    ]);
     const response = await fetch(`${TERMINAL_SERVER_URL}/api/context/${encodeURIComponent(embedId)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ docs }),
+      body: JSON.stringify({ docs, viewport }),
     });
 
     if (!response.ok) {
@@ -189,8 +196,32 @@ async function pushContextToServer(embedId: string, widgetId: string): Promise<v
 }
 
 /**
+ * Poll terminal server for "context requested" (e.g. user typed <viewport> in terminal).
+ * When our embedIds are requested, push context so the terminal gets viewport/docs.
+ */
+async function pollContextRequests(): Promise<void> {
+  if (embedIdToWidgetId.size === 0) return;
+  try {
+    const res = await fetch(`${TERMINAL_SERVER_URL}/api/context/requests`);
+    if (!res.ok) return;
+    const { embedIds } = (await res.json()) as { embedIds: string[] };
+    if (!Array.isArray(embedIds) || embedIds.length === 0) return;
+    for (const embId of embedIds) {
+      const widId = embedIdToWidgetId.get(embId);
+      if (widId) {
+        await pushContextToServer(embId, widId);
+      }
+    }
+  } catch (err) {
+    console.error('[Terminal] Context request poll error:', err);
+  }
+}
+
+/**
  * Start a periodic refresh loop that keeps the terminal server's
- * context store up-to-date with the latest connected docs.
+ * context store up-to-date with the latest connected docs and viewport.
+ * Also polls for context requests so when the terminal needs viewport,
+ * we push it on demand.
  */
 function startContextRefresh(): void {
   stopContextRefresh();
@@ -203,16 +234,24 @@ function startContextRefresh(): void {
     }
   }, CONTEXT_REFRESH_MS);
 
-  console.log('[Terminal] Context refresh started (every', CONTEXT_REFRESH_MS, 'ms)');
+  contextRequestPollInterval = setInterval(() => {
+    pollContextRequests();
+  }, CONTEXT_REQUEST_POLL_MS);
+
+  console.log('[Terminal] Context refresh started (every', CONTEXT_REFRESH_MS, 'ms), request poll every', CONTEXT_REQUEST_POLL_MS, 'ms');
 }
 
 /**
- * Stop the periodic context refresh.
+ * Stop the periodic context refresh and request poll.
  */
 function stopContextRefresh(): void {
   if (contextRefreshInterval !== null) {
     clearInterval(contextRefreshInterval);
     contextRefreshInterval = null;
+  }
+  if (contextRequestPollInterval !== null) {
+    clearInterval(contextRequestPollInterval);
+    contextRequestPollInterval = null;
   }
 }
 
@@ -223,10 +262,23 @@ function generateEmbedId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
+/** Optional settings to apply via embed URL (session name, start folder, etc.) */
+export interface TerminalEmbedOptions {
+  /** Named session (e.g. "frontend", "backend") – becomes part of session ID */
+  sessionName?: string;
+  /** Working directory for the terminal (e.g. "/app", "~/project") */
+  cwd?: string;
+}
+
 /**
  * Create the terminal embed widget on the board
  */
-async function createTerminalEmbed(terminalUrl: string, boardId: string, boardName: string): Promise<void> {
+async function createTerminalEmbed(
+  terminalUrl: string,
+  boardId: string,
+  boardName: string,
+  embedOptions?: TerminalEmbedOptions
+): Promise<void> {
   if (!miroSdk) {
     throw new Error('Miro SDK not initialized');
   }
@@ -240,6 +292,13 @@ async function createTerminalEmbed(terminalUrl: string, boardId: string, boardNa
   url.searchParams.set('embedId', embedId);
   url.searchParams.set('boardId', boardId);
   url.searchParams.set('boardName', boardName);
+  // Optional: pre-define session name and cwd via URL so terminal spawns with these settings
+  if (embedOptions?.sessionName != null && embedOptions.sessionName !== '') {
+    url.searchParams.set('name', embedOptions.sessionName);
+  }
+  if (embedOptions?.cwd != null && embedOptions.cwd !== '') {
+    url.searchParams.set('cwd', embedOptions.cwd);
+  }
   const fullUrl = url.toString();
 
   // Create the embed widget
@@ -340,9 +399,20 @@ export const terminalEmbedModule: MiroModule = {
     });
   },
 
-  async start(_options?: unknown): Promise<void> {
+  async start(options?: { config?: { sessionName?: string; cwd?: string } }): Promise<void> {
     state = 'active';
     console.log('[Terminal] Module starting...');
+
+    const embedOptions: TerminalEmbedOptions | undefined =
+      options?.config?.sessionName != null || options?.config?.cwd != null
+        ? {
+            sessionName: options.config.sessionName,
+            cwd: options.config.cwd,
+          }
+        : undefined;
+    if (embedOptions) {
+      console.log('[Terminal] Embed URL params:', embedOptions);
+    }
 
     try {
       // Get the current board ID and name
@@ -355,8 +425,8 @@ export const terminalEmbedModule: MiroModule = {
       const ptyResponse = await startTerminalSession(boardId);
       console.log('[Terminal] PTY session started:', ptyResponse.sid);
 
-      // Create the embed widget on the board with board info for variable expansion
-      await createTerminalEmbed(ptyResponse.url, boardId, boardName);
+      // Create the embed widget on the board with board info and optional URL params
+      await createTerminalEmbed(ptyResponse.url, boardId, boardName, embedOptions);
       console.log('[Terminal] Terminal embed created successfully');
 
       // Emit success event

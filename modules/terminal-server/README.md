@@ -78,6 +78,19 @@ Response:
 }
 ```
 
+#### Embed URL parameters
+
+When creating a terminal from the Miro app, you can pre-set session name and working directory via the **embed URL** so the terminal spawns with those settings without opening the in-terminal settings panel.
+
+- **From the app panel URL:** Open the app with query params, then start the Terminal Embed module. Example:  
+  `https://.../app.html?name=frontend&cwd=/app`  
+  Clicking "Terminal Embed" will create an embed whose iframe loads with `name=frontend` and `cwd=/app`.
+- **Parameters:**  
+  - `name` – Session name (e.g. `frontend`, `backend`). Becomes part of the session ID and gives the terminal its own named session.  
+  - `cwd` – Working directory for the shell (e.g. `/app`, `~/project`). Must be under `ALLOWED_ROOT`.
+
+The terminal iframe also accepts these same query params when loaded directly; they are applied as initial settings and persisted.
+
 #### Close Session (Optional)
 
 ```http

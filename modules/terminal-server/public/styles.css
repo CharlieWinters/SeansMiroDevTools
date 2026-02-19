@@ -10,6 +10,8 @@ html, body {
   overflow: hidden;
   background-color: #1e1e1e;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  /* Keep scroll (pan) in iframe but prevent pinch-zoom from affecting parent Miro UI */
+  touch-action: pan-x pan-y;
 }
 
 #status-bar {

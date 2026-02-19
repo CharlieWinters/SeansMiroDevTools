@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Terminal</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
   <link rel="stylesheet" href="styles.css">
@@ -64,6 +64,7 @@
             <li><code>&lt;current_board&gt;</code> - Full board URL</li>
             <li><code>&lt;board_id&gt;</code> - Board ID only</li>
             <li><code>&lt;board_name&gt;</code> - Board name</li>
+            <li><code>&lt;viewport&gt;</code> - Current viewport (JSON: x, y, width, height)</li>
             <li><code>&lt;input&gt;</code> - Content from items connected via Miro connectors</li>
           </ul>
         </div>
@@ -85,6 +86,12 @@
     const token = params.get('token');
     const cwd = params.get('cwd');
     const name = params.get('name');
+
+    // Prevent zoom (Ctrl/Cmd + scroll) inside iframe from affecting parent Miro board.
+    // Scrolling without modifier continues to work for the terminal.
+    document.addEventListener('wheel', (e) => {
+      if (e.ctrlKey || e.metaKey) e.preventDefault();
+    }, { passive: false });
     
     // Board info for variable expansion (passed from Miro app)
     const defaultBoardId = params.get('boardId') || '';
@@ -176,6 +183,20 @@
     const initialLoad = loadSettingsWithSessionKey();
     let currentSettings = initialLoad.settings;
     let SETTINGS_KEY = initialLoad.key;
+
+    // Apply embed URL params when present (terminal created with ?name=...&cwd=... from Miro)
+    const urlSessionName = params.get('name');
+    const urlCwd = params.get('cwd');
+    if ((urlSessionName !== null && urlSessionName !== '') || (urlCwd !== null && urlCwd !== '')) {
+      if (urlSessionName !== null && urlSessionName !== '') currentSettings.sessionName = urlSessionName;
+      if (urlCwd !== null && urlCwd !== '') currentSettings.cwd = urlCwd;
+      SETTINGS_KEY = getSettingsKeyForSession(currentSettings.sessionName);
+      try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(currentSettings));
+        window.name = `terminal:${currentSettings.sessionName || ''}`;
+        console.log('Applied embed URL params: sessionName=', currentSettings.sessionName, 'cwd=', currentSettings.cwd);
+      } catch (e) { console.warn('Failed to persist URL params:', e); }
+    }
 
     // Compute effective session ID based on session name
     function getEffectiveSessionId(sessionName) {
@@ -620,25 +641,53 @@
       let inputBuffer = '';
 
       /**
-       * Fetch connected documents from the terminal server's context store.
+       * Fetch full context (connected docs + viewport) from the terminal server.
        * The Miro app panel pushes context there because postMessage can't
        * cross between sibling Miro iframes (embed ↔ panel).
+       * When viewport is missing we signal "context requested" so the Miro app
+       * can push; we retry once after a short delay to pick it up.
        */
-      async function requestConnectedDocs() {
+      async function requestContext() {
         if (!embedId) {
-          console.warn('No embedId – cannot fetch connected docs');
-          return [];
+          console.warn('No embedId – cannot fetch context');
+          return { docs: [], viewport: null };
         }
 
-        const res = await fetch(`/api/context/${encodeURIComponent(embedId)}`);
+        // Signal that this embed needs context; Miro app polls and will push.
+        try {
+          await fetch(`/api/context/${encodeURIComponent(embedId)}/request`, { method: 'POST' });
+        } catch (e) {
+          console.warn('Context request signal failed:', e);
+        }
+
+        let res = await fetch(`/api/context/${encodeURIComponent(embedId)}`);
         if (!res.ok) {
           throw new Error(`Failed to fetch context: ${res.status}`);
         }
 
-        const data = await res.json();
-        const docs = data.docs || [];
-        lastContextFetch = { at: new Date().toISOString(), count: docs.length, docs };
-        console.log('Fetched connected docs: embedId=', embedId, 'count=', docs.length, docs.length ? 'ids=' + docs.map(d => d.id).join(',') : '');
+        let data = await res.json();
+        let docs = data.docs || [];
+        let viewport = data.viewport || null;
+
+        // If viewport not yet pushed, give Miro app time to respond then retry once.
+        if (!viewport) {
+          await new Promise(r => setTimeout(r, 1500));
+          res = await fetch(`/api/context/${encodeURIComponent(embedId)}`);
+          if (res.ok) {
+            data = await res.json();
+            docs = data.docs || [];
+            viewport = data.viewport || null;
+          }
+        }
+
+        lastContextFetch = { at: new Date().toISOString(), count: docs.length, docs, viewport };
+        console.log('Fetched context: embedId=', embedId, 'docs=', docs.length, 'viewport=', viewport ? 'yes' : 'no');
+        return { docs, viewport };
+      }
+
+      /** @deprecated Use requestContext().docs */
+      async function requestConnectedDocs() {
+        const { docs } = await requestContext();
         return docs;
       }
 
@@ -664,7 +713,8 @@
        * - <current_board> → full Miro board URL
        * - <board_id> → just the board ID
        * - <board_name> → board title
-       * - <input> → content from connected documents (requires async fetch)
+       * - <viewport> → current viewport JSON (async fetch)
+       * - <input> → content from connected documents (async fetch)
        * - <selected_items> → (not available in embed, returns placeholder)
        */
       function expandSyncVariables(input) {
@@ -673,17 +723,17 @@
         // Use current settings for board info
         const { boardUrl, boardId, boardName } = currentSettings;
         
-        // Replace <current_board> with full Miro board URL
-        output = output.replace(/<current_board>/g, boardUrl || '(no-board-url)');
+        // Replace <current_board> with full Miro board URL (brackets = shell-safe)
+        output = output.replace(/<current_board>/g, boardUrl || '[no-board-url]');
         
         // Replace <board_id> with just the board ID
-        output = output.replace(/<board_id>/g, boardId || '(no-board-id)');
+        output = output.replace(/<board_id>/g, boardId || '[no-board-id]');
         
         // Replace <board_name> with board name
-        output = output.replace(/<board_name>/g, boardName || '(no-board-name)');
+        output = output.replace(/<board_name>/g, boardName || '[no-board-name]');
         
         // Replace <selected_items> - not available in embed context
-        output = output.replace(/<selected_items>/g, '(selection-not-available)');
+        output = output.replace(/<selected_items>/g, '[selection-not-available]');
         
         if (output !== input) {
           console.log('Sync variable expansion:', { input, output });
@@ -693,22 +743,42 @@
       }
 
       /**
-       * Expand all variables including async ones like <input>
+       * Sync expansion plus safe placeholders for async vars. Use when we must not
+       * send raw <viewport> or <input> to the shell (e.g. fallback on error).
+       */
+      function expandSyncVariablesSafe(input) {
+        let output = expandSyncVariables(input);
+        output = output.replace(/<viewport>/gi, '[no-viewport]');
+        output = output.replace(/<input>/gi, '[no-connected-docs]');
+        return output;
+      }
+
+      /**
+       * Expand all variables including async ones like <viewport> and <input>
        * Returns a promise that resolves with the fully expanded string
        */
       async function expandVariables(input) {
+        const needsContext = /<input>/i.test(input) || /<viewport>/i.test(input);
         let output = expandSyncVariables(input);
-        
-        // Check if we need to expand <input> (connected docs)
-        if (/<input>/i.test(output)) {
+
+        if (needsContext) {
           try {
-            const docs = await requestConnectedDocs();
-            // Concatenate all document contents, separated by newlines
-            const inputContent = docs.map(d => d.content).join('\n') || 'no-connected-docs';
-            output = output.replace(/<input>/gi, inputContent);
+            const { docs, viewport } = await requestContext();
+
+            if (/<input>/i.test(output)) {
+              const inputContent = docs.map(d => d.content).join('\n') || '[no-connected-docs]';
+              output = output.replace(/<input>/gi, inputContent);
+            }
+            if (/<viewport>/i.test(output)) {
+              const viewportStr = viewport && typeof viewport === 'object'
+                ? JSON.stringify({ x: viewport.x, y: viewport.y, width: viewport.width, height: viewport.height })
+                : '[no-viewport]';
+              output = output.replace(/<viewport>/gi, viewportStr);
+            }
           } catch (error) {
-            console.error('Failed to fetch connected docs:', error);
-            output = output.replace(/<input>/gi, 'error-fetching-input');
+            console.error('Failed to fetch context:', error);
+            output = output.replace(/<input>/gi, '[error-fetching-input]');
+            output = output.replace(/<viewport>/gi, '[error-fetching-viewport]');
           }
         }
 
@@ -726,7 +796,7 @@
       
       // Check if input contains async variables that need fetching
       function containsAsyncVariables(input) {
-        return /<input>/i.test(input);
+        return /<input>/i.test(input) || /<viewport>/i.test(input);
       }
 
       // Track if we're currently processing an async expansion
@@ -760,14 +830,17 @@
                 ws.send(JSON.stringify({ type: 'input', data: expanded + '\r' }));
               } catch (error) {
                 console.error('Error expanding variables:', error);
-                // On error, just send the original command
-                ws.send(JSON.stringify({ type: 'input', data: '\r' }));
+                // Never send raw <...> to shell (causes redirection parse errors).
+                // Clear line and send safe expansion (async vars become placeholders).
+                const fallback = expandSyncVariablesSafe(inputBuffer);
+                ws.send(JSON.stringify({ type: 'input', data: '\x15' }));
+                ws.send(JSON.stringify({ type: 'input', data: fallback + '\r' }));
               } finally {
                 isProcessingAsync = false;
               }
             } else {
-              // Sync-only variables
-              const expanded = expandSyncVariables(inputBuffer);
+              // Sync-only variables (safe expand so we never send raw <viewport>/<input> to shell)
+              const expanded = expandSyncVariablesSafe(inputBuffer);
               
               // Clear the current line in shell (Ctrl+U kills line, then we send expanded)
               ws.send(JSON.stringify({ type: 'input', data: '\x15' })); // Ctrl+U

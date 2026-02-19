@@ -127,14 +127,17 @@ export class ModuleRegistry {
       throw new Error(`Module "${id}" is not registered`);
     }
 
-    if (entry.info.state === 'active') {
+    const alreadyActive = entry.info.state === 'active';
+    // terminal-embed can be "started" multiple times (each call creates a new embed on the board)
+    if (alreadyActive && id !== 'terminal-embed') {
       console.warn(`Module "${id}" is already active`);
       return;
     }
 
     try {
-      // Update state to loading
-      entry.info.state = 'loading';
+      if (!alreadyActive) {
+        entry.info.state = 'loading';
+      }
 
       // Instantiate from factory if needed
       if (entry.factory && !entry.module) {
@@ -142,11 +145,12 @@ export class ModuleRegistry {
         entry.module.registerModule(this.bus, this.sdk);
       }
 
-      // Start the module
+      // Start the module (for terminal-embed this creates an embed; may be called repeatedly)
       await entry.module.start(options);
 
-      // Update state to active
-      entry.info.state = 'active';
+      if (!alreadyActive) {
+        entry.info.state = 'active';
+      }
       entry.info.error = undefined;
 
       this.bus.emit('modules', 'module:started', { moduleId: id });

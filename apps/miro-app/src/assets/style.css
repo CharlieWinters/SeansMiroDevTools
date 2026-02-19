@@ -83,6 +83,83 @@ body {
   background-color: var(--color-error);
 }
 
+/* Terminal Embed options (Miro IDE panel) */
+.terminal-options-section {
+  margin-top: 20px;
+  padding: 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+}
+
+.terminal-options-section h3 {
+  margin: 0 0 6px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.terminal-options-desc {
+  margin: 0 0 12px 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.terminal-options-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.terminal-option-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.terminal-option-field label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.terminal-option-field input {
+  padding: 8px 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+
+.terminal-option-field input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.terminal-option-field input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.btn-create-terminal {
+  margin-top: 16px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--color-primary);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.btn-create-terminal:hover {
+  background: #3455e6;
+}
+
+.btn-create-terminal:active {
+  background: #2a48d4;
+}
+
 /* Code/Terminal styling */
 .code-block {
   font-family: var(--font-mono);

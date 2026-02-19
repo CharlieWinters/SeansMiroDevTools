@@ -22,11 +22,16 @@ if (!SIGN_SECRET && process.env.NODE_ENV === 'production') {
 // Sessions map: sid -> { pty, clients[], lastSeen }
 const sessions = new Map();
 
-// Context map: embedId -> { docs[], updatedAt }
-// Stores connected-doc context pushed by the Miro app panel
+// Context map: embedId -> { docs[], viewport?, updatedAt }
+// Stores connected-doc context and viewport pushed by the Miro app panel
 // so the terminal iframe can retrieve it via HTTP (they can't postMessage
 // each other because they are sibling iframes under Miro's board frame).
 const contextStore = new Map();
+
+// Context requests: embedId -> timestamp when terminal asked for context.
+// Miro app polls GET /api/context/requests and pushes context for these embedIds.
+const CONTEXT_REQUEST_TTL_MS = 30_000;
+const contextRequestTimes = new Map();
 
 // Express app
 const app = express();
@@ -249,18 +254,34 @@ app.delete('/api/pty/close', (req, res) => {
 // The Miro app panel pushes connected-doc context here so the terminal
 // iframe (which lives in a separate Miro iframe) can fetch it via HTTP.
 
-// Store / update context for an embed
+// Store / update context for an embed (docs + optional viewport)
 app.post('/api/context/:embedId', (req, res) => {
   const { embedId } = req.params;
-  const { docs } = req.body;
+  const { docs, viewport } = req.body;
 
   if (!Array.isArray(docs)) {
     return res.status(400).json({ error: 'docs must be an array' });
   }
 
-  contextStore.set(embedId, { docs, updatedAt: Date.now() });
-  console.log(`[context] POST embedId=${embedId} stored ${docs.length} doc(s)`, docs.length ? docs.map((d) => d.id) : '');
+  const viewportData = viewport && typeof viewport === 'object' && Number.isFinite(viewport.x) && Number.isFinite(viewport.y) && Number.isFinite(viewport.width) && Number.isFinite(viewport.height)
+    ? { x: viewport.x, y: viewport.y, width: viewport.width, height: viewport.height }
+    : null;
+
+  contextStore.set(embedId, { docs, viewport: viewportData, updatedAt: Date.now() });
+  console.log(`[context] POST embedId=${embedId} stored ${docs.length} doc(s)`, viewportData ? ', viewport' : '');
   res.json({ ok: true, count: docs.length });
+});
+
+// Miro app polls this to see which embedIds need context, then pushes for each.
+// Must be registered before /api/context/:embedId so "requests" is not treated as an embedId.
+app.get('/api/context/requests', (req, res) => {
+  const now = Date.now();
+  const embedIds = [];
+  for (const [id, at] of contextRequestTimes.entries()) {
+    if (now - at < CONTEXT_REQUEST_TTL_MS) embedIds.push(id);
+    else contextRequestTimes.delete(id);
+  }
+  res.json({ embedIds });
 });
 
 // Retrieve context for an embed
@@ -270,11 +291,20 @@ app.get('/api/context/:embedId', (req, res) => {
 
   if (!ctx) {
     console.log(`[context] GET embedId=${embedId} → no context (empty)`);
-    return res.json({ docs: [], updatedAt: null });
+    return res.json({ docs: [], viewport: null, updatedAt: null });
   }
 
   console.log(`[context] GET embedId=${embedId} → ${ctx.docs.length} doc(s)`);
   res.json(ctx);
+});
+
+// Terminal signals "I need context for this embed" (e.g. user typed <viewport>).
+// Miro app polls GET /api/context/requests and pushes context for requested embedIds.
+app.post('/api/context/:embedId/request', (req, res) => {
+  const { embedId } = req.params;
+  contextRequestTimes.set(embedId, Date.now());
+  console.log(`[context] request embedId=${embedId}`);
+  res.json({ ok: true });
 });
 
 // Health check
