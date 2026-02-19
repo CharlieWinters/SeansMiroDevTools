@@ -45,6 +45,14 @@ A modular development environment inside Miro where the board is the control pla
 - Node.js 18+
 - pnpm 8+
 
+### Install the app in Miro
+
+Install this app against one of your Miro teams using this link:
+
+[https://miro.com/app-install/?response_type=code&client_id=3458764660412827340&redirect_uri=%2Fapp-install%2Fconfirm%2F](https://miro.com/app-install/?response_type=code&client_id=3458764660412827340&redirect_uri=%2Fapp-install%2Fconfirm%2F)
+
+Sign in to Miro when prompted and complete the install for the team where you want to use Miro IDE.
+
 ### Installation
 
 ```bash
